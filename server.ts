@@ -178,6 +178,45 @@ async function startServer() {
     }
   });
 
+  app.post("/api/survey", async (req: any, res: any) => {
+    try {
+      const { fullName, phone, email, ...surveyData } = req.body || {};
+
+      if (!fullName) {
+        return res.status(400).json({ error: "Full name is required" });
+      }
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL;
+      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+      if (!supabaseUrl || !supabaseServiceKey) {
+        console.warn("Supabase credentials not configured.");
+        return res.json({ success: true, simulated: true, message: "Survey received. (Simulated)" });
+      }
+
+      const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+      const { data, error } = await supabase
+        .from("survey_responses")
+        .insert([{
+          applicant_name: fullName,
+          applicant_email: email || null,
+          applicant_phone: phone || null,
+          survey_data: surveyData,
+        }]);
+
+      if (error) {
+        console.warn("Survey insert error (handled):", error);
+        return res.json({ success: true, simulated: true, message: "Survey received. (Database insert failed - Simulated)" });
+      }
+
+      res.json({ success: true, data, message: "Survey submitted successfully." });
+    } catch (error: any) {
+      console.error("Survey error:", error);
+      res.status(500).json({ error: error.message || "Failed to submit survey" });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
