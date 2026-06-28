@@ -1,20 +1,38 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { ShieldCheck, FileText, BadgeCheck, UploadCloud, CheckCircle2, Globe2 } from 'lucide-react';
+import { ShieldCheck, FileText, BadgeCheck, UploadCloud, CheckCircle2, Globe2, ArrowRight } from 'lucide-react';
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+
+function formatPhone(val: string | null): string {
+  if (!val) return '';
+  let digits = val.replace(/\D/g, '');
+  if (digits.startsWith('92')) digits = digits.substring(2);
+  else if (digits.startsWith('0')) digits = digits.substring(1);
+  if (!digits.length) return '';
+  let formatted = '+92';
+  if (digits.length > 0) formatted += ' ' + digits.substring(0, 3);
+  if (digits.length > 3) formatted += ' ' + digits.substring(3, 10);
+  return formatted;
+}
 
 export default function Hero() {
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
+  const navigate = useNavigate();
+
+  // Flow: 'form' | 'extracting' | 'welcome' | 'submitting' | 'success'
+  const [flowState, setFlowState] = useState<'form' | 'extracting' | 'welcome' | 'submitting' | 'success'>('form');
   const [extractedData, setExtractedData] = useState<any>(null);
-  const [cvName, setCvName] = useState<string | null>(null);
-  const [licenseName, setLicenseName] = useState<string | null>(null);
+  const [pncFile, setPncFile] = useState<File | null>(null);
+  const [pncFileName, setPncFileName] = useState<string | null>(null);
+
+  // Form fields (pre-filled from AI extraction)
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-
   const [email, setEmail] = useState('');
-  const [licenseNumber, setLicenseNumber] = useState('');
-  const [isExtracting, setIsExtracting] = useState(false);
+  const [pncNumber, setPncNumber] = useState('');
+  const [pncExpiry, setPncExpiry] = useState('');
+  const [cnic, setCnic] = useState('');
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const words = e.target.value.split(' ');
@@ -29,93 +47,139 @@ export default function Hero() {
     let val = e.target.value.replace(/\D/g, '');
     if (val.startsWith('92')) val = val.substring(2);
     else if (val.startsWith('0')) val = val.substring(1);
-    
-    if (val.length === 0) {
-      setPhone('');
-      return;
-    }
-
+    if (val.length === 0) { setPhone(''); return; }
     let formatted = '+92';
     if (val.length > 0) formatted += ' ' + val.substring(0, 3);
     if (val.length > 3) formatted += ' ' + val.substring(3, 10);
     setPhone(formatted);
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'cv' | 'pnc') => {
+  const handlePncUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (type === 'cv') setCvName(file.name);
-    if (type === 'pnc') setLicenseName(file.name);
-
-    setIsExtracting(true);
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      const res = await fetch('/api/extract', {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json();
-      if (data.extractedData) {
-        if (data.extractedData.extractedName && !name) setName(data.extractedData.extractedName);
-        if (data.extractedData.extractedEmail && !email) setEmail(data.extractedData.extractedEmail);
-        if (data.extractedData.extractedLicense && !licenseNumber) setLicenseNumber(data.extractedData.extractedLicense);
-        if (data.extractedData.extractedPhone && !phone) {
-          let val = data.extractedData.extractedPhone.replace(/\D/g, '');
-          if (val.startsWith('92')) val = val.substring(2);
-          else if (val.startsWith('0')) val = val.substring(1);
-          let formatted = '+92';
-          if (val.length > 0) formatted += ' ' + val.substring(0, 3);
-          if (val.length > 3) formatted += ' ' + val.substring(3, 10);
-          setPhone(formatted);
-        }
-      }
-    } catch (err) {
-      console.error("Extraction error:", err);
-    } finally {
-      setIsExtracting(false);
+    // 4MB limit to avoid edge function body size issues with base64
+    if (file.size > 4 * 1024 * 1024) {
+      alert('File is too large. Please upload a PNC image under 4MB.');
+      return;
     }
+
+    setPncFile(file);
+    setPncFileName(file.name);
+    setFlowState('extracting');
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64Data = (reader.result as string).split(',')[1]; // strip data:...;base64 prefix
+
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/extract-info`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64Data, mimeType: file.type }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Extraction failed (${res.status})`);
+        }
+
+        const data = await res.json();
+        if (data.success && data.data) {
+          const d = data.data;
+          setName(d.extractedName || '');
+          setPncNumber(d.extractedPncNumber || '');
+          setPncExpiry(d.extractedPncExpiry || '');
+          setPhone(formatPhone(d.extractedPhone));
+          setEmail(d.extractedEmail || '');
+          setCnic(d.extractedCnic || '');
+          setExtractedData(d);
+          setFlowState('welcome');
+        } else {
+          throw new Error(data.error || 'Extraction returned no usable data');
+        }
+      } catch (err) {
+        console.error('Extraction error:', err);
+        alert('Failed to extract data from the PNC image. Please try a clearer photo.');
+        setFlowState('form');
+        setPncFile(null);
+        setPncFileName(null);
+      }
+    };
+    reader.onerror = () => {
+      alert('Failed to read the file. Please try again.');
+      setFlowState('form');
+      setPncFile(null);
+      setPncFileName(null);
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
-    
-    const form = e.target as HTMLFormElement;
-    const formData = new FormData(form);
+
+    if (!name || !pncNumber) {
+      alert('Full name and PNC license number are required.');
+      return;
+    }
+
+    setFlowState('submitting');
 
     try {
-      const response = await fetch('/api/apply', {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/submit-apply`, {
         method: 'POST',
-        body: formData, // Send the FormData directly
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: name,
+          phone: phone || null,
+          email: email || null,
+          pncNumber,
+          pncExpiry: pncExpiry || null,
+          cnic: cnic || null,
+          aiExtractedData: extractedData,
+        }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to submit application');
-      }
-      
-      const contentType = response.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        throw new Error("Server returned an invalid response. Please try again.");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Submission failed (${res.status})`);
       }
 
-      const resData = await response.json();
-
-      setIsSuccess(true);
-      setExtractedData(resData?.extractedData || null);
-      form.reset();
-      setCvName(null);
-      setLicenseName(null);
-      setName('');
-      setPhone('');
-    } catch (error) {
-      console.error('Submission error:', error);
+      const data = await res.json();
+      if (data.success) {
+        setFlowState('success');
+      } else {
+        throw new Error(data.error || 'Submission failed');
+      }
+    } catch (err) {
+      console.error('Submission error:', err);
       alert('There was an error submitting your application. Please try again.');
-    } finally {
-      setIsSubmitting(false);
+      setFlowState('welcome');
     }
+  };
+
+  const goToSurvey = () => {
+    navigate('/survey', {
+      state: {
+        applicantName: name,
+        applicantPhone: phone,
+        applicantEmail: email,
+        extractedData,
+      },
+    });
+  };
+
+  const resetForm = () => {
+    setFlowState('form');
+    setExtractedData(null);
+    setPncFile(null);
+    setPncFileName(null);
+    setName('');
+    setPhone('');
+    setEmail('');
+    setPncNumber('');
+    setPncExpiry('');
+    setCnic('');
   };
 
   return (
@@ -123,12 +187,12 @@ export default function Hero() {
       {/* Background decoration */}
       <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-brand-500/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-5%] left-[-5%] w-[400px] h-[400px] bg-blue-600/10 rounded-full blur-[100px] pointer-events-none" />
-      
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 w-full">
-        <div className="grid lg:grid-cols-12 gap-12 lg:gap-8 items-center">
-          
+        <div className="grid lg:grid-cols-12 gap-12 lg:gap-8 items-start">
+
           {/* Text Content */}
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
@@ -138,14 +202,14 @@ export default function Hero() {
               <Globe2 size={14} />
               <span>Hiring Nurses for 10+ Countries</span>
             </div>
-            
+
             <h1 className="text-4xl sm:text-5xl lg:text-7xl font-serif font-light text-white leading-tight mb-6">
-              Your Nursing Career, <br/>
+              Your Nursing Career, <br />
               <span className="italic font-normal text-white">Across Borders.</span>
             </h1>
-            
+
             <p className="text-lg text-slate-400 mb-8 leading-relaxed max-w-lg">
-              We are actively hiring qualified nurses for premier medical facilities worldwide. Upload your CV and PNC License below for an immediate interview schedule.
+              We are actively hiring qualified nurses for premier medical facilities worldwide. Upload your PNC License below for an immediate interview schedule.
             </p>
 
             <div className="flex flex-wrap items-center gap-3 sm:gap-4 mb-8 text-3xl">
@@ -161,7 +225,7 @@ export default function Hero() {
               <span title="Oman">🇴🇲</span>
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-2 flex items-center h-full pt-1">+ More</span>
             </div>
-            
+
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-10">
               <img src="https://images.unsplash.com/photo-1584432810601-6c7f27d2362b?auto=format&fit=crop&q=80&w=600&h=400" className="w-full h-32 sm:h-40 rounded-2xl border border-white/10 object-cover grayscale opacity-80 hover:grayscale-0 transition-all duration-500 cursor-pointer" alt="Nurse working" />
               <img src="https://images.unsplash.com/photo-1576091160550-2173ff9e5eb3?auto=format&fit=crop&q=80&w=600&h=400" className="w-full h-32 sm:h-40 rounded-2xl border border-white/10 object-cover grayscale opacity-80 hover:grayscale-0 transition-all duration-500 cursor-pointer" alt="Nurse with patient" />
@@ -180,7 +244,6 @@ export default function Hero() {
               </div>
             </div>
 
-            {/* Nurses Image Row */}
             <div className="flex items-center gap-4">
               <div className="flex -space-x-4">
                 <img src="https://images.unsplash.com/photo-1584432810601-6c7f27d2362b?auto=format&fit=crop&q=80&w=100&h=100" className="w-12 h-12 rounded-full border-2 border-[#080a0f] object-cover grayscale opacity-80" alt="Nurse" />
@@ -188,11 +251,11 @@ export default function Hero() {
                 <img src="https://images.unsplash.com/photo-1581056771107-24ca5f463cd5?auto=format&fit=crop&q=80&w=100&h=100" className="w-12 h-12 rounded-full border-2 border-[#080a0f] object-cover grayscale opacity-80" alt="Nurse" />
               </div>
               <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-tight">
-                Join 5,000+ Nurses<br/>Placed Globally
+                Join 5,000+ Nurses<br />Placed Globally
               </div>
             </div>
           </motion.div>
-          
+
           {/* Application Form */}
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -201,61 +264,72 @@ export default function Hero() {
             className="lg:col-span-5 w-full"
           >
             <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-3xl p-8 sm:p-10 shadow-2xl">
-              {isSuccess ? (
-                <div className="text-center py-8">
-                  <motion.div 
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    className="w-20 h-20 bg-brand-500/20 border border-brand-500/30 rounded-full flex items-center justify-center mx-auto mb-6"
+
+              {/* STATE: Extracting */}
+              {flowState === 'extracting' && (
+                <div className="text-center py-12">
+                  <div className="w-16 h-16 border-4 border-brand-500/30 border-t-brand-400 rounded-full animate-spin mx-auto mb-6" />
+                  <h3 className="text-xl font-serif text-white mb-2">Reading Your PNC License...</h3>
+                  <p className="text-sm text-slate-400">AI is extracting your details from the uploaded image.</p>
+                  {pncFileName && (
+                    <p className="text-xs text-slate-500 mt-4">{pncFileName}</p>
+                  )}
+                </div>
+              )}
+
+              {/* STATE: Welcome — extracted, show form */}
+              {(flowState === 'welcome' || flowState === 'submitting') && (
+                <div>
+                  {/* Welcome Banner */}
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-brand-500/15 border border-brand-500/25 rounded-2xl p-5 mb-6 text-center"
                   >
-                    <CheckCircle2 className="w-10 h-10 text-brand-400" />
+                    <h3 className="text-2xl font-serif text-white mb-1">
+                      Welcome, {name || 'Nurse'}! 👋
+                    </h3>
+                    <p className="text-sm text-slate-400">Your PNC license was verified successfully.</p>
                   </motion.div>
-                  <h3 className="text-2xl font-serif text-white mb-2">Application Received!</h3>
-                  <p className="text-slate-400 mb-6 text-sm">We've successfully processed your documents. <br/> A survey link has been generated based on your profile.</p>
-                  
-                  {extractedData && Object.keys(extractedData).length > 0 && (
-                    <div className="bg-slate-900/50 border border-white/5 rounded-2xl p-4 text-left mb-8">
+
+                  {/* Extracted Data Summary */}
+                  {extractedData && (
+                    <div className="bg-slate-900/50 border border-white/5 rounded-2xl p-4 mb-6">
                       <h4 className="text-[10px] text-brand-400 uppercase tracking-widest font-bold mb-3 border-b border-white/5 pb-2">AI Extracted Details</h4>
-                      <ul className="space-y-2 text-sm text-slate-300">
-                        {extractedData.extractedName && <li><strong className="text-slate-500">Name:</strong> {extractedData.extractedName}</li>}
-                        {extractedData.extractedEmail && <li><strong className="text-slate-500">Email:</strong> {extractedData.extractedEmail}</li>}
-                        {extractedData.extractedPhone && <li><strong className="text-slate-500">Phone:</strong> {extractedData.extractedPhone}</li>}
-                        {extractedData.extractedLicense && <li><strong className="text-slate-500">License:</strong> {extractedData.extractedLicense}</li>}
-                        {extractedData.experience && <li><strong className="text-slate-500">Experience:</strong> {extractedData.experience}</li>}
-                      </ul>
+                      <dl className="space-y-1.5 text-sm">
+                        {extractedData.extractedName && (
+                          <div className="flex justify-between"><dt className="text-slate-500">Name</dt><dd className="text-white">{extractedData.extractedName}</dd></div>
+                        )}
+                        {extractedData.extractedPncNumber && (
+                          <div className="flex justify-between"><dt className="text-slate-500">PNC #</dt><dd className="text-white font-mono">{extractedData.extractedPncNumber}</dd></div>
+                        )}
+                        {extractedData.extractedPncExpiry && (
+                          <div className="flex justify-between"><dt className="text-slate-500">PNC Expiry</dt><dd className="text-white">{extractedData.extractedPncExpiry}</dd></div>
+                        )}
+                        {extractedData.extractedPhone && (
+                          <div className="flex justify-between"><dt className="text-slate-500">Phone</dt><dd className="text-white">{extractedData.extractedPhone}</dd></div>
+                        )}
+                        {extractedData.extractedEmail && (
+                          <div className="flex justify-between"><dt className="text-slate-500">Email</dt><dd className="text-white">{extractedData.extractedEmail}</dd></div>
+                        )}
+                        {extractedData.extractedCnic && (
+                          <div className="flex justify-between"><dt className="text-slate-500">CNIC</dt><dd className="text-white font-mono">{extractedData.extractedCnic}</dd></div>
+                        )}
+                      </dl>
                     </div>
                   )}
 
-                  <Link 
-                    to="/survey"
-                    state={{ extractedData }}
-                    className="inline-flex justify-center items-center bg-brand-500 text-slate-900 px-8 py-3 rounded-xl font-bold hover:bg-brand-400 transition-colors w-full mb-4"
-                  >
-                    Complete Required Survey
-                  </Link>
-                  
-                  <button 
-                    onClick={() => setIsSuccess(false)}
-                    className="bg-white/5 text-slate-300 px-8 py-3 rounded-xl font-bold hover:bg-white/10 transition-colors w-full text-sm"
-                  >
-                    Submit Another Application
-                  </button>
-                </div>
-              ) : (
-                <div>
-                  <h3 className="text-2xl font-serif text-white mb-2">Instant Application</h3>
-                  <p className="text-sm text-slate-500 mb-8">Complete the fields below for an immediate interview invitation.</p>
-
+                  {/* Application Form */}
                   <form onSubmit={handleSubmit} className="space-y-5">
                     <div>
-                      <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">Full Name</label>
+                      <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">Full Name <span className="text-brand-400">*</span></label>
                       <input required name="fullName" value={name} onChange={handleNameChange} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="John Doe" />
                     </div>
-                    
+
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">Phone</label>
-                        <input required name="phone" value={phone} onChange={handlePhoneChange} type="tel" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="+92 3XX XXXXXXX" />
+                        <input name="phone" value={phone} onChange={handlePhoneChange} type="tel" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="+92 3XX XXXXXXX" />
                       </div>
                       <div>
                         <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">Email <span className="text-slate-600 font-normal lowercase tracking-normal">(optional)</span></label>
@@ -263,54 +337,31 @@ export default function Hero() {
                       </div>
                     </div>
 
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">PNC License # <span className="text-brand-400">*</span></label>
+                        <input required name="pncNumber" value={pncNumber} onChange={e => setPncNumber(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="PN-XXXXXXX" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">PNC Expiry</label>
+                        <input name="pncExpiry" value={pncExpiry} onChange={e => setPncExpiry(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="YYYY-MM-DD" />
+                      </div>
+                    </div>
+
                     <div>
-                      <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">PNC License <span className="text-slate-600 font-normal lowercase tracking-normal">(optional)</span></label>
-                      <input name="licenseNumber" value={licenseNumber} onChange={e => setLicenseNumber(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="PN-XXXXXXX" />
+                      <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">CNIC Number</label>
+                      <input name="cnic" value={cnic} onChange={e => setCnic(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="XXXXX-XXXXXXX-X" />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4 pt-2">
-                      {/* CV Upload */}
-                      <div className="relative cursor-pointer group">
-                        <input 
-                          type="file" 
-                          name="cv"
-                          accept=".pdf,.doc,.docx"
-                          onChange={(e) => handleFileUpload(e, 'cv')}
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
-                        />
-                        <div className={`border-2 border-dashed rounded-xl p-3 flex flex-col items-center justify-center transition-colors h-24 ${cvName ? 'border-brand-500/50 bg-brand-500/10' : 'border-white/5 bg-white/0 group-hover:bg-white/5'}`}>
-                          <FileText className={`w-5 h-5 mx-auto mb-1 ${cvName ? 'text-brand-400' : 'text-slate-500 group-hover:text-brand-400'}`} />
-                          <p className="text-[10px] font-bold text-slate-400 truncate w-full text-center">{cvName || "Upload CV"}</p>
-                          <p className="text-[9px] text-slate-600 mt-1">{cvName ? "Ready" : "Optional"}</p>
-                        </div>
-                      </div>
-
-                      {/* PNC Upload */}
-                      <div className="relative cursor-pointer group">
-                        <input 
-                          type="file" 
-                          name="pnc"
-                          accept=".pdf,.jpg,.jpeg,.png"
-                          onChange={(e) => handleFileUpload(e, 'pnc')}
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
-                        />
-                        <div className={`border-2 border-dashed rounded-xl p-3 flex flex-col items-center justify-center transition-colors h-24 ${licenseName ? 'border-brand-500/50 bg-brand-500/10' : 'border-white/5 bg-white/0 group-hover:bg-white/5'}`}>
-                          <BadgeCheck className={`w-5 h-5 mx-auto mb-1 ${licenseName ? 'text-brand-400' : 'text-slate-500 group-hover:text-brand-400'}`} />
-                          <p className="text-[10px] font-bold text-slate-400 truncate w-full text-center">{licenseName || "PNC File"}</p>
-                          <p className="text-[9px] text-slate-600 mt-1">{licenseName ? "Ready" : "Optional"}</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <button 
-                      type="submit" 
-                      disabled={isSubmitting || isExtracting}
+                    <button
+                      type="submit"
+                      disabled={flowState === 'submitting'}
                       className="w-full bg-brand-500 hover:bg-brand-400 text-slate-900 font-bold py-4 rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98] flex justify-center items-center gap-2 mt-4 shadow-lg shadow-brand-500/20 disabled:opacity-70 disabled:transform-none"
                     >
-                      {isSubmitting || isExtracting ? (
+                      {flowState === 'submitting' ? (
                         <>
                           <div className="w-5 h-5 border-2 border-slate-900/30 border-t-slate-900 rounded-full animate-spin" />
-                          <span>{isExtracting ? "Extracting Data..." : "Submitting..."}</span>
+                          Submitting...
                         </>
                       ) : (
                         <>
@@ -326,9 +377,117 @@ export default function Hero() {
                   </form>
                 </div>
               )}
+
+              {/* STATE: Success — application submitted */}
+              {flowState === 'success' && (
+                <div className="text-center py-8">
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="w-20 h-20 bg-brand-500/20 border border-brand-500/30 rounded-full flex items-center justify-center mx-auto mb-6"
+                  >
+                    <CheckCircle2 className="w-10 h-10 text-brand-400" />
+                  </motion.div>
+                  <h3 className="text-2xl font-serif text-white mb-2">Application Submitted!</h3>
+                  <p className="text-slate-400 mb-6 text-sm">Your information has been saved. Please complete the required survey to finalize your application.</p>
+
+                  <button
+                    onClick={goToSurvey}
+                    className="inline-flex justify-center items-center bg-brand-500 text-slate-900 px-8 py-3 rounded-xl font-bold hover:bg-brand-400 transition-colors w-full mb-4 gap-2"
+                  >
+                    Complete Required Survey
+                    <ArrowRight size={18} />
+                  </button>
+
+                  <button
+                    onClick={resetForm}
+                    className="bg-white/5 text-slate-300 px-8 py-3 rounded-xl font-bold hover:bg-white/10 transition-colors w-full text-sm"
+                  >
+                    Submit Another Application
+                  </button>
+                </div>
+              )}
+
+              {/* STATE: Initial form — PNC upload + manual entry */}
+              {flowState === 'form' && (
+                <div>
+                  <h3 className="text-2xl font-serif text-white mb-2">Instant Application</h3>
+                  <p className="text-sm text-slate-500 mb-6">Upload your PNC License to auto-fill your details.</p>
+
+                  {/* PNC Upload — MANDATORY, always visible in form state */}
+                  <div className="mb-6">
+                    <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-3">
+                      PNC License Image <span className="text-brand-400">* Required</span>
+                    </label>
+                    <div className="relative cursor-pointer group">
+                      <input
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.pdf"
+                        onChange={handlePncUpload}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                        required
+                      />
+                      <div className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center transition-colors ${pncFileName ? 'border-brand-500/50 bg-brand-500/10' : 'border-white/10 bg-white/[0.02] group-hover:bg-white/5'}`}>
+                        <BadgeCheck className={`w-8 h-8 mx-auto mb-2 ${pncFileName ? 'text-brand-400' : 'text-slate-500 group-hover:text-brand-400'}`} />
+                        <p className="text-sm font-bold text-slate-300">{pncFileName || "Tap to upload PNC License"}</p>
+                        <p className="text-[10px] text-slate-500 mt-1">{pncFileName ? "Tap to change" : "JPG, PNG or PDF — max 4MB"}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Manual entry option */}
+                  <form onSubmit={handleSubmit} className="space-y-5">
+                    <div>
+                      <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">Full Name <span className="text-brand-400">*</span></label>
+                      <input required name="fullName" value={name} onChange={handleNameChange} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="John Doe" />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">Phone <span className="text-brand-400">*</span></label>
+                        <input required name="phone" value={phone} onChange={handlePhoneChange} type="tel" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="+92 3XX XXXXXXX" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">Email <span className="text-slate-600 font-normal lowercase tracking-normal">(optional)</span></label>
+                        <input name="email" value={email} onChange={e => setEmail(e.target.value)} type="email" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="nurse@example.com" />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">PNC License # <span className="text-brand-400">*</span></label>
+                        <input required name="pncNumber" value={pncNumber} onChange={e => setPncNumber(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="PN-XXXXXXX" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">PNC Expiry</label>
+                        <input name="pncExpiry" value={pncExpiry} onChange={e => setPncExpiry(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="YYYY-MM-DD" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">CNIC Number <span className="text-brand-400">*</span></label>
+                      <input required name="cnic" value={cnic} onChange={e => setCnic(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="XXXXX-XXXXXXX-X" />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={flowState === 'submitting'}
+                      className="w-full bg-brand-500 hover:bg-brand-400 text-slate-900 font-bold py-4 rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98] flex justify-center items-center gap-2 mt-4 shadow-lg shadow-brand-500/20 disabled:opacity-70 disabled:transform-none"
+                    >
+                      <UploadCloud size={18} />
+                      Submit Application
+                    </button>
+
+                    <p className="text-center text-[9px] text-slate-600 mt-4 uppercase tracking-widest">
+                      Secure • Confidential • Worldwide
+                    </p>
+                  </form>
+                </div>
+              )}
+
             </div>
           </motion.div>
-          
+
         </div>
       </div>
     </section>

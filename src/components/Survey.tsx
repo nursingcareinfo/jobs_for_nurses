@@ -6,7 +6,8 @@ import './Survey.css';
 
 export default function Survey() {
   const location = useLocation();
-  const extractedData = location.state?.extractedData || {};
+  const { applicantName, applicantPhone, applicantEmail, extractedData: routeExtracted } = location.state || {};
+  const extractedData = routeExtracted || {};
 
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -30,7 +31,153 @@ export default function Survey() {
     setProgress(pct);
   };
 
-  const handleSubmit = () => {
+  const collectSurveyData = () => {
+    const sections = document.querySelectorAll('.section');
+    const body = (idx: number) => sections[idx]?.querySelector('.section-body');
+
+    // Helper: read a single text/select/textarea field by label prefix
+    const fv = (sectionBody: Element | null | undefined, labelPrefix: string): string => {
+      if (!sectionBody) return '';
+      const fields = sectionBody.querySelectorAll('.field');
+      for (const field of fields) {
+        const label = field.querySelector('label');
+        if (label && label.textContent?.trim().startsWith(labelPrefix)) {
+          const el = field.querySelector('input:not([type="radio"]):not([type="checkbox"]), select, textarea') as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+          return el?.value ?? '';
+        }
+      }
+      return '';
+    };
+
+    // Helper: read checked radio label text (returns the .radio-label text of the checked input in a container)
+    const radioVal = (container: Element, name: string): string => {
+      const checked = container.querySelector(`input[type="radio"][name="${name}"]:checked`);
+      if (!checked) return '';
+      const item = checked.closest('.radio-item');
+      return item?.querySelector('.radio-label')?.textContent?.trim() ?? '';
+    };
+
+    // Helper: collect checked checkbox label texts
+    const checkedLabels = (container: Element): string[] => {
+      const result: string[] = [];
+      container.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+        const item = cb.closest('.check-item');
+        const lbl = item?.querySelector('.check-label');
+        if (lbl?.textContent) result.push(lbl.textContent.trim());
+      });
+      return result;
+    };
+
+    // Helper: collect selected tag button texts
+    const selectedTags = (container: Element): string[] => {
+      const result: string[] = [];
+      container.querySelectorAll('.tag-btn.selected').forEach(btn => {
+        if (btn.textContent) result.push(btn.textContent.trim());
+      });
+      return result;
+    };
+
+    // Helper: read scale (1-5) value
+    const scaleVal = (container: Element, scaleId: string): number | null => {
+      const scaleRow = container.querySelector(`#${scaleId}`);
+      if (!scaleRow) return null;
+      const active = scaleRow.querySelector('.scale-btn.active');
+      if (!active) return null;
+      return parseInt(active.textContent || '0', 10) || null;
+    };
+
+    const s1 = body(0);
+    const personal = {
+      fullName: fv(s1, 'Full name'),
+      gender: fv(s1, 'Gender'),
+      dateOfBirth: fv(s1, 'Date of birth'),
+      cnicNumber: fv(s1, 'CNIC number'),
+      phone: fv(s1, 'Mobile number'),
+      whatsappNumber: fv(s1, 'WhatsApp number'),
+      email: fv(s1, 'Email address'),
+      city: fv(s1, 'City of residence'),
+      area: fv(s1, 'Area'),
+      transport: fv(s1, 'Do you own a vehicle'),
+    };
+
+    // --- Section 2: PNC license & credentials ---
+    const s2 = body(1);
+    const credentials = {
+      pncLicenseNumber: fv(s2, 'PNC license number'),
+      pncLicenseExpiry: fv(s2, 'PNC license expiry'),
+      qualification: fv(s2, 'Professional qualification'),
+      specializations: s2 ? selectedTags(s2) : [],
+      yearsExperience: fv(s2, 'Total years of experience'),
+      homeNursingExperience: fv(s2, 'Experience in home nursing'),
+      institutions: fv(s2, 'Name of institution'),
+    };
+
+    // --- Section 3: Employment & income ---
+    const s3 = body(2);
+    const employment = {
+      status: s3 ? radioVal(s3, 'emp') : '',
+      monthlyIncome: fv(s3, 'Average monthly income'),
+      supplementalIncome: s3 ? radioVal(s3, 'supp') : '',
+      supplementalIncomeAmount: fv(s3, 'If yes'),
+      expectedShiftPay: fv(s3, 'how much would you expect'),
+    };
+
+    // --- Section 4: Availability & preferences ---
+    const s4 = body(3);
+    const availability = {
+      weeklyHours: fv(s4, 'How many hours'),
+      shifts: s4 ? checkedLabels(s4.querySelector('.check-group')!) : [],
+      travelWillingness: fv(s4, 'willing to travel'),
+      transitionWillingness: s4 ? radioVal(s4, 'transition') : '',
+      patientPreferences: s4 ? checkedLabels(s4.querySelectorAll('.check-group')[1] as HTMLElement) : [],
+    };
+
+    // --- Section 5: Safety ---
+    const s5 = body(4);
+    const safety = {
+      comfortLevel: s5 ? scaleVal(s5, 'scale1') : null,
+      challenges: s5 ? checkedLabels(s5.querySelectorAll('.check-group')[0] as HTMLElement) : [],
+      concerns: s5 ? checkedLabels(s5.querySelectorAll('.check-group')[1] as HTMLElement) : [],
+      platformSafety: s5 ? radioVal(s5, 'safer') : '',
+      safetyNotes: fv(s5, 'describe any specific incident'),
+    };
+
+    // --- Section 6: App viability ---
+    const s6 = body(5);
+    const viability = {
+      platformAwareness: s6 ? radioVal(s6, 'aware') : '',
+      findingWorkChannels: s6 ? checkedLabels(s6.querySelectorAll('.check-group')[0] as HTMLElement) : [],
+      viabilityRating: s6 ? scaleVal(s6, 'scale2') : null,
+      importantFeatures: s6 ? checkedLabels(s6.querySelectorAll('.check-group')[1] as HTMLElement) : [],
+      recommendationRating: s6 ? scaleVal(s6, 'scale3') : null,
+      adoptionBarrier: fv(s6, 'single biggest barrier'),
+    };
+
+    // --- Section 7: Final remarks ---
+    const s7 = body(6);
+    const finalRemarks = {
+      additionalNotes: fv(s7, 'anything else'),
+      followupConsent: s7 ? radioVal(s7, 'followup') : '',
+    };
+
+    return {
+      fullName: personal.fullName,
+      phone: personal.phone,
+      email: personal.email,
+      extractedData,
+      personal,
+      credentials,
+      employment,
+      availability,
+      safety,
+      viability,
+      finalRemarks,
+    };
+  };
+
+  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+
+  const handleSubmit = async () => {
     const consent = document.getElementById('consentCheck') as HTMLInputElement;
     if (!consent?.checked) {
       if (consent?.parentElement) {
@@ -39,7 +186,26 @@ export default function Survey() {
       }
       return;
     }
-    setIsSubmitted(true);
+
+    const payload = collectSurveyData();
+
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/submit-survey`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to submit survey');
+      }
+
+      setIsSubmitted(true);
+    } catch (error) {
+      console.error('Survey submission error:', error);
+      alert('There was an error submitting your survey. Please try again.');
+    }
   };
 
   const toggleTag = (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -93,7 +259,7 @@ export default function Survey() {
             <div className="field-row">
               <div className="field">
                 <label>Full name <span className="req">*</span></label>
-                <input type="text" placeholder="As on CNIC / PNC license" defaultValue={extractedData.extractedName || ''} onChange={updateProgress} />
+                <input type="text" placeholder="As on CNIC / PNC license" defaultValue={applicantName || extractedData.extractedName || ''} onChange={updateProgress} />
               </div>
               <div className="field">
                 <label>Gender <span className="req">*</span></label>
@@ -118,7 +284,7 @@ export default function Survey() {
             <div className="field-row">
               <div className="field">
                 <label>Mobile number <span className="req">*</span></label>
-                <input type="tel" placeholder="+92 3XX XXXXXXX" defaultValue={extractedData.extractedPhone || ''} onChange={updateProgress} />
+                <input type="tel" placeholder="+92 3XX XXXXXXX" defaultValue={applicantPhone || extractedData.extractedPhone || ''} onChange={updateProgress} />
               </div>
               <div className="field">
                 <label>WhatsApp number</label>
@@ -127,7 +293,7 @@ export default function Survey() {
             </div>
             <div className="field">
               <label>Email address</label>
-              <input type="email" placeholder="optional but recommended" defaultValue={extractedData.extractedEmail || ''} onChange={updateProgress} />
+              <input type="email" placeholder="optional but recommended" defaultValue={applicantEmail || extractedData.extractedEmail || ''} onChange={updateProgress} />
             </div>
             <div className="field-row">
               <div className="field">
@@ -170,7 +336,7 @@ export default function Survey() {
             <div className="field-row">
               <div className="field">
                 <label>PNC license number <span className="req">*</span></label>
-                <input type="text" placeholder="e.g. PNC-XXXXX" defaultValue={extractedData.extractedLicense || ''} onChange={updateProgress} />
+                <input type="text" placeholder="e.g. PNC-XXXXX" defaultValue={extractedData.extractedPncNumber || extractedData.extractedLicense || ''} onChange={updateProgress} />
                 <div className="hint">Pakistan Nursing Council registration number</div>
               </div>
               <div className="field">
