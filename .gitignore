@@ -8,3 +8,5 @@ coverage/
 !.env.example
 .omo/
 .playwright-mcp/
+responsive-*.png
+live-*.png
