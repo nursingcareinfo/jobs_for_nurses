@@ -1,7 +1,7 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { ShieldCheck, FileText, BadgeCheck, UploadCloud, CheckCircle2, Globe2, ChevronDown, ChevronUp, Briefcase, GraduationCap, Wrench, MapPin, Languages } from 'lucide-react';
+import { ShieldCheck, FileText, BadgeCheck, UploadCloud, CheckCircle2, Globe2 } from 'lucide-react';
 
 export default function Hero() {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -22,32 +22,6 @@ export default function Hero() {
   const [experience, setExperience] = useState('');
   const [skills, setSkills] = useState('');
   const [certifications, setCertifications] = useState('');
-  const [showProfessional, setShowProfessional] = useState(false);
-
-  const handleNameChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const words = e.target.value.split(' ');
-    const capitalized = words.map(word => {
-      if (word.length === 0) return word;
-      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-    }).join(' ');
-    setName(capitalized);
-  };
-
-  const handlePhoneChange = (e: ChangeEvent<HTMLInputElement>) => {
-    let val = e.target.value.replace(/\D/g, '');
-    if (val.startsWith('92')) val = val.substring(2);
-    else if (val.startsWith('0')) val = val.substring(1);
-    
-    if (val.length === 0) {
-      setPhone('');
-      return;
-    }
-
-    let formatted = '+92';
-    if (val.length > 0) formatted += ' ' + val.substring(0, 3);
-    if (val.length > 3) formatted += ' ' + val.substring(3, 10);
-    setPhone(formatted);
-  };
 
   const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>, type: 'cv' | 'pnc') => {
     const file = e.target.files?.[0];
@@ -87,9 +61,7 @@ export default function Hero() {
         if (ed.extractedSkills && !skills) setSkills(ed.extractedSkills);
         if (ed.extractedCertifications && !certifications) setCertifications(ed.extractedCertifications);
 
-        if (ed.extractedEducation || ed.extractedExperience || ed.extractedSkills || ed.extractedCertifications) {
-          setShowProfessional(true);
-        }
+
       }
     } catch (err) {
       console.error("Extraction error:", err);
@@ -105,6 +77,10 @@ export default function Hero() {
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
 
+    formData.set('fullName', name);
+    formData.set('phone', phone);
+    formData.set('email', email);
+    formData.set('licenseNumber', licenseNumber);
     formData.set('address', address);
     formData.set('languages', languages);
     formData.set('education', education);
@@ -142,7 +118,6 @@ export default function Hero() {
       setExperience('');
       setSkills('');
       setCertifications('');
-      setShowProfessional(false);
     } catch (error) {
       console.error('Submission error:', error);
       alert('There was an error submitting your application. Please try again.');
@@ -282,101 +257,14 @@ export default function Hero() {
               ) : (
                 <div>
                   <h3 className="text-2xl font-serif text-white mb-2">Instant Application</h3>
-                  <p className="text-sm text-slate-500 mb-8">Upload your CV to auto-fill your details, or fill manually.</p>
+                  <p className="text-sm text-slate-500 mb-8">Upload your CV and PNC License — we'll extract everything automatically.</p>
 
                   <form onSubmit={handleSubmit} className="space-y-5">
-                    <div>
-                      <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">Full Name</label>
-                      <input required name="fullName" value={name} onChange={handleNameChange} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="John Doe" />
-                    </div>
-                    
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">Phone</label>
-                        <input required name="phone" value={phone} onChange={handlePhoneChange} type="tel" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="+92 3XX XXXXXXX" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">Email <span className="text-slate-600 font-normal lowercase tracking-normal">(optional)</span></label>
-                        <input name="email" value={email} onChange={e => setEmail(e.target.value)} type="email" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="nurse@example.com" />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2">PNC License <span className="text-slate-600 font-normal lowercase tracking-normal">(optional)</span></label>
-                      <input name="licenseNumber" value={licenseNumber} onChange={e => setLicenseNumber(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="PN-XXXXXXX" />
-                    </div>
-
-                    {/* Professional Details (collapsible) */}
-                    <div className="border-t border-white/5 pt-4">
-                      <button
-                        type="button"
-                        onClick={() => setShowProfessional(!showProfessional)}
-                        className="flex items-center justify-between w-full text-left"
-                      >
-                        <span className="text-[10px] uppercase tracking-widest text-brand-400 font-bold flex items-center gap-2">
-                          <Briefcase size={14} />
-                          Professional Details
-                        </span>
-                        {showProfessional ? <ChevronUp size={16} className="text-slate-500" /> : <ChevronDown size={16} className="text-slate-500" />}
-                      </button>
-
-                      {showProfessional && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          transition={{ duration: 0.3 }}
-                          className="space-y-4 mt-4"
-                        >
-                          <div>
-                            <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2 flex items-center gap-1">
-                              <MapPin size={12} /> Address <span className="text-slate-600 font-normal lowercase tracking-normal">(optional)</span>
-                            </label>
-                            <input name="address" value={address} onChange={e => setAddress(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="City, Country" />
-                          </div>
-
-                          <div>
-                            <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2 flex items-center gap-1">
-                              <Languages size={12} /> Languages <span className="text-slate-600 font-normal lowercase tracking-normal">(optional)</span>
-                            </label>
-                            <input name="languages" value={languages} onChange={e => setLanguages(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="English, Urdu, Sindhi..." />
-                          </div>
-
-                          <div>
-                            <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2 flex items-center gap-1">
-                              <GraduationCap size={12} /> Education <span className="text-slate-600 font-normal lowercase tracking-normal">(optional)</span>
-                            </label>
-                            <input name="education" value={education} onChange={e => setEducation(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="BSN from University of..." />
-                          </div>
-
-                          <div>
-                            <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2 flex items-center gap-1">
-                              <Briefcase size={12} /> Experience <span className="text-slate-600 font-normal lowercase tracking-normal">(optional)</span>
-                            </label>
-                            <input name="experience" value={experience} onChange={e => setExperience(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="5 years at Aga Khan Hospital..." />
-                          </div>
-
-                          <div>
-                            <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2 flex items-center gap-1">
-                              <Wrench size={12} /> Skills <span className="text-slate-600 font-normal lowercase tracking-normal">(optional)</span>
-                            </label>
-                            <input name="skills" value={skills} onChange={e => setSkills(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="ICU, Paediatrics, Wound Care..." />
-                          </div>
-
-                          <div>
-                            <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold block mb-2 flex items-center gap-1">
-                              <BadgeCheck size={12} /> Certifications <span className="text-slate-600 font-normal lowercase tracking-normal">(optional)</span>
-                            </label>
-                            <input name="certifications" value={certifications} onChange={e => setCertifications(e.target.value)} type="text" className="w-full bg-slate-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-brand-500/50 transition-colors placeholder:text-slate-600" placeholder="BLS, ACLS, NRP..." />
-                          </div>
-                        </motion.div>
-                      )}
-                    </div>
-
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 pt-2">
                       <div className="relative cursor-pointer group">
                         <input 
                           type="file" 
-                          name="cv"
+                          name="cv" required
                           accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
                           onChange={(e) => handleFileUpload(e, 'cv')}
                           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
